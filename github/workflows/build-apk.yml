@@ -2,8 +2,7 @@ name: Build All Bat APK
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -11,12 +10,11 @@ permissions:
 
 jobs:
   build:
-    name: Build Android APK
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Extract Android project
@@ -41,20 +39,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Validate Python and JavaScript
+      - name: Validate and prepare web assets
         shell: bash
         run: |
           set -euo pipefail
 
           python -m py_compile scripts/prepare_web_assets.py
-
           node --check app/src/main/assets/native-bridge.js
-
-      - name: Prepare web assets
-        shell: bash
-        run: |
-          set -euo pipefail
-
           python scripts/prepare_web_assets.py
 
           test -s app/src/main/assets/index.html
@@ -75,14 +66,8 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Build debug APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          gradle --no-daemon clean assembleDebug --stacktrace
-
-          test -s app/build/outputs/apk/debug/app-debug.apk
+      - name: Build APK
+        run: gradle --no-daemon clean assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
