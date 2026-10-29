@@ -12,17 +12,25 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Unpack source bundle uploaded to the repository root
+      - name: Extract Android project
+        shell: bash
         run: |
+          set -euo pipefail
+
           test -s all-bat-android-source.zip
+
           mkdir -p /tmp/allbat-source
           unzip -q all-bat-android-source.zip -d /tmp/allbat-source
+
           test -d /tmp/allbat-source/all-bat-android
+
           cp -a /tmp/allbat-source/all-bat-android/. .
+
           test -f app/build.gradle.kts
           test -f scripts/prepare_web_assets.py
 
@@ -31,11 +39,15 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Download current UI and inject the native bridge
+      - name: Validate and prepare web assets
+        shell: bash
         run: |
+          set -euo pipefail
+
           python -m py_compile scripts/prepare_web_assets.py
           node --check app/src/main/assets/native-bridge.js
           python scripts/prepare_web_assets.py
+
           test -s app/src/main/assets/index.html
 
       - name: Set up Java
@@ -46,9 +58,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: Install SDK packages
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        with:
+          packages: "platform-tools platforms;android-35 build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -58,7 +69,7 @@ jobs:
       - name: Build APK
         run: gradle --no-daemon clean assembleDebug --stacktrace
 
-      - name: Publish APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: all-bat-debug-apk
