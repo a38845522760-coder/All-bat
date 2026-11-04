@@ -1,0 +1,215 @@
+name: Build All Bat APK
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-apk.yml"
+      - "all-bat-android-source.zip"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: all-bat-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      # 1. دریافت مخزن
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. بررسی و استخراج سورس برنامه
+      - name: Extract Android source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -s all-bat-android-source.zip ]; then
+            echo "::error::all-bat-android-source.zip is missing or empty."
+            exit 1
+          fi
+
+          mkdir -p /tmp/allbat-source
+
+          unzip -q all-bat-android-source.zip \
+            -d /tmp/allbat-source
+
+          if [ ! -d /tmp/allbat-source/all-bat-android ]; then
+            echo "::error::Expected all-bat-android directory was not found in ZIP."
+            echo "ZIP contents:"
+            unzip -l all-bat-android-source.zip
+            exit 1
+          fi
+
+          cp -a /tmp/allbat-source/all-bat-android/. .
+
+          if [ ! -f app/build.gradle.kts ]; then
+            echo "::error::app/build.gradle.kts was not found."
+            exit 1
+          fi
+
+          if [ ! -f scripts/prepare_web_assets.py ]; then
+            echo "::error::scripts/prepare_web_assets.py was not found."
+            exit 1
+          fi
+
+          echo "Android source extracted successfully."
+
+      # 3. نصب Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 4. آماده‌سازی فایل‌های رابط کاربری
+      - name: Prepare web assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python -m py_compile scripts/prepare_web_assets.py
+
+          if [ -f app/src/main/assets/native-bridge.js ]; then
+            node --check app/src/main/assets/native-bridge.js
+          fi
+
+          python scripts/prepare_web_assets.py
+
+          if [ ! -s app/src/main/assets/index.html ]; then
+            echo "::error::Web assets preparation failed."
+            exit 1
+          fi
+
+          echo "Web assets prepared successfully."
+
+      # 5. نصب Java
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # 6. آماده‌سازی Android SDK
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      # 7. نصب بسته‌های Android SDK
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sdkmanager --install \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "platform-tools"
+
+          sdkmanager --list_installed
+
+      # 8. بررسی نسخه Java و انتخاب روش اجرای Gradle
+      - name: Prepare Gradle
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          java -version
+
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew
+            echo "GRADLE_MODE=wrapper" >> "$GITHUB_ENV"
+            echo "Gradle wrapper found."
+          else
+            echo "GRADLE_MODE=standalone" >> "$GITHUB_ENV"
+
+            if ! command -v gradle >/dev/null 2>&1; then
+              echo "Gradle is not installed. Installing Gradle 8.9."
+
+              mkdir -p "$RUNNER_TEMP/gradle"
+
+              curl --fail --location --retry 3 \
+                https://services.gradle.org/distributions/gradle-8.9-bin.zip \
+                --output "$RUNNER_TEMP/gradle/gradle.zip"
+
+              unzip -q \
+                "$RUNNER_TEMP/gradle/gradle.zip" \
+                -d "$RUNNER_TEMP/gradle"
+
+              echo "$RUNNER_TEMP/gradle/gradle-8.9/bin" \
+                >> "$GITHUB_PATH"
+            fi
+          fi
+
+      # 9. بررسی تنظیمات پروژه
+      - name: Validate Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f app/build.gradle.kts
+
+          if [ "$GRADLE_MODE" = "wrapper" ]; then
+            ./gradlew --version
+          else
+            gradle --version
+          fi
+
+      # 10. ساخت APK
+      - name: Build APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$GRADLE_MODE" = "wrapper" ]; then
+            ./gradlew \
+              --no-daemon \
+              --stacktrace \
+              clean \
+              assembleDebug
+          else
+            gradle \
+              --no-daemon \
+              --stacktrace \
+              clean \
+              assembleDebug
+          fi
+
+      # 11. بررسی خروجی
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -s "$APK_PATH" ]; then
+            echo "::error::APK was not generated."
+            find app/build/outputs -maxdepth 5 -type f \
+              2>/dev/null || true
+            exit 1
+          fi
+
+          ls -lh "$APK_PATH"
+
+          echo "APK generated successfully."
+
+      # 12. انتشار فایل APK
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-bat-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
