@@ -1,0 +1,31 @@
+; Iron Yard — Godot 4 project foundation
+; Open this file with Godot 4.4 or newer.
+
+config_version=5
+
+[application]
+
+config/name="Iron Yard"
+config/description="A mobile-first, modular 3D game project."
+run/main_scene="res://scenes/boot/boot.tscn"
+config/features=PackedStringArray("4.4")
+
+[autoload]
+
+EventBus="*res://scripts/autoload/event_bus.gd"
+AppState="*res://scripts/autoload/app_state.gd"
+SettingsManager="*res://scripts/autoload/settings_manager.gd"
+SaveManager="*res://scripts/autoload/save_manager.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+
+[rendering]
+
+renderer/rendering_method="mobile"
+renderer/rendering_method.mobile="mobile"
+textures/default_filters/use_nearest_mipmap_filter=false
+environment/defaults/default_clear_color=Color(0.035, 0.055, 0.075, 1)
